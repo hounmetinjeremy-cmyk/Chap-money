@@ -5,6 +5,7 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
 
+// build-cache-bust: 2026-08-19T14:05Z
 // PORT et BASE_PATH ne sont nécessaires que pour le serveur dev/preview
 // (Replit). En mode `vite build` (CI/Cloudflare), on utilise des valeurs
 // par défaut sans bloquer le build.
