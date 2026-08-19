@@ -1,0 +1,9 @@
+name = "chap-money"
+main = "./artifacts/mockup-sandbox/dist/_worker.js"
+compatibility_date = "2026-08-19"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./artifacts/mockup-sandbox/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
