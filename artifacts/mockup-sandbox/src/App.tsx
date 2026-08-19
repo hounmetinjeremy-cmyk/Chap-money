@@ -1,146 +1,201 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useState } from "react";
 
-import { modules as discoveredModules } from "./.generated/mockup-components";
+type Step = "form" | "pending" | "success" | "error";
+type PaymentType = "mobile" | "card";
 
-type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
+const OPERATORS = [
+  { value: "mtn_open", label: "MTN Mobile Money", country: "BJ" },
+  { value: "moov_open", label: "Moov Money", country: "BJ" },
+];
 
-function _resolveComponent(
-  mod: Record<string, unknown>,
-  name: string,
-): ComponentType | undefined {
-  const fns = Object.values(mod).filter(
-    (v) => typeof v === "function",
-  ) as ComponentType[];
-  return (
-    (mod.default as ComponentType) ||
-    (mod.Preview as ComponentType) ||
-    (mod[name] as ComponentType) ||
-    fns[fns.length - 1]
-  );
-}
+function App() {
+  const [step, setStep] = useState<Step>("form");
+  const [paymentType, setPaymentType] = useState<PaymentType>("mobile");
+  const [amount, setAmount] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [operator, setOperator] = useState(OPERATORS[0].value);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [transactionId, setTransactionId] = useState<number | null>(null);
 
-function PreviewRenderer({
-  componentPath,
-  modules,
-}: {
-  componentPath: string;
-  modules: ModuleMap;
-}) {
-  const [Component, setComponent] = useState<ComponentType | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorMsg("");
 
-  useEffect(() => {
-    let cancelled = false;
-
-    setComponent(null);
-    setError(null);
-
-    async function loadComponent(): Promise<void> {
-      const key = `./components/mockups/${componentPath}.tsx`;
-      const loader = modules[key];
-      if (!loader) {
-        setError(`No component found at ${componentPath}.tsx`);
-        return;
-      }
-
-      try {
-        const mod = await loader();
-        if (cancelled) {
-          return;
-        }
-        const name = componentPath.split("/").pop()!;
-        const comp = _resolveComponent(mod, name);
-        if (!comp) {
-          setError(
-            `No exported React component found in ${componentPath}.tsx\n\nMake sure the file has at least one exported function component.`,
-          );
-          return;
-        }
-        setComponent(() => comp);
-      } catch (e) {
-        if (cancelled) {
-          return;
-        }
-
-        const message = e instanceof Error ? e.message : String(e);
-        setError(`Failed to load preview.\n${message}`);
-      }
+    if (!amount || Number(amount) <= 0) {
+      setErrorMsg("Merci d'entrer un montant valide.");
+      return;
     }
 
-    void loadComponent();
+    setStep("pending");
 
-    return () => {
-      cancelled = true;
-    };
-  }, [componentPath, modules]);
-
-  if (error) {
-    return (
-      <pre style={{ color: "red", padding: "2rem", fontFamily: "system-ui" }}>
-        {error}
-      </pre>
-    );
+    try {
+      if (paymentType === "mobile") {
+        if (!phoneNumber) {
+          setErrorMsg("Merci d'entrer un numéro de téléphone.");
+          setStep("form");
+          return;
+        }
+        const res = await fetch("/api/checkout/mobile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: Number(amount),
+            phoneNumber,
+            country: OPERATORS.find((o) => o.value === operator)?.country ?? "BJ",
+            operator,
+            description: "Paiement Chap Money",
+          }),
+        });
+        const data = (await res.json()) as { transactionId?: number; error?: string };
+        if (!res.ok || !data.transactionId) {
+          throw new Error(data.error ?? "Erreur lors du paiement");
+        }
+        setTransactionId(data.transactionId);
+        setStep("success");
+      } else {
+        const res = await fetch("/api/checkout/card", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: Number(amount),
+            description: "Paiement Chap Money",
+          }),
+        });
+        const data = (await res.json()) as { transactionId?: number; paymentUrl?: string; error?: string };
+        if (!res.ok || !data.paymentUrl) {
+          throw new Error(data.error ?? "Erreur lors du paiement");
+        }
+        window.location.href = data.paymentUrl;
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Une erreur est survenue.");
+      setStep("error");
+    }
   }
 
-  if (!Component) return null;
+  function reset() {
+    setStep("form");
+    setAmount("");
+    setPhoneNumber("");
+    setErrorMsg("");
+    setTransactionId(null);
+  }
 
-  return <Component />;
-}
-
-function getBasePath(): string {
-  return import.meta.env.BASE_URL.replace(/\/$/, "");
-}
-
-function getPreviewExamplePath(): string {
-  const basePath = getBasePath();
-  return `${basePath}/preview/ComponentName`;
-}
-
-function Gallery() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-      <div className="text-center max-w-md">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-3">
-          Component Preview Server
-        </h1>
-        <p className="text-gray-500 mb-4">
-          This server renders individual components for the workspace canvas.
-        </p>
-        <p className="text-sm text-gray-400">
-          Access component previews at{" "}
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-            {getPreviewExamplePath()}
-          </code>
-        </p>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <h1 className="text-xl font-semibold text-gray-900 mb-1">Chap Money</h1>
+        <p className="text-sm text-gray-500 mb-6">Envoyez de l'argent en toute simplicité</p>
+
+        {step === "success" ? (
+          <div className="text-center py-6">
+            <div className="text-3xl mb-3">✅</div>
+            <p className="font-medium text-gray-900 mb-1">Demande envoyée</p>
+            <p className="text-sm text-gray-500 mb-1">
+              Validez la transaction sur votre téléphone via votre opérateur.
+            </p>
+            {transactionId && (
+              <p className="text-xs text-gray-400 mb-4">Transaction #{transactionId}</p>
+            )}
+            <button
+              onClick={reset}
+              className="mt-4 w-full rounded-lg bg-gray-900 text-white py-2.5 text-sm font-medium"
+            >
+              Nouveau paiement
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentType("mobile")}
+                className={`flex-1 rounded-lg py-2 text-sm font-medium border ${
+                  paymentType === "mobile"
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-200"
+                }`}
+              >
+                Mobile Money
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentType("card")}
+                className={`flex-1 rounded-lg py-2 text-sm font-medium border ${
+                  paymentType === "card"
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-200"
+                }`}
+              >
+                Carte bancaire
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Montant (XOF)
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="1000"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                required
+              />
+            </div>
+
+            {paymentType === "mobile" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Opérateur
+                  </label>
+                  <select
+                    value={operator}
+                    onChange={(e) => setOperator(e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  >
+                    {OPERATORS.map((op) => (
+                      <option key={op.value} value={op.value}>
+                        {op.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Numéro de téléphone
+                  </label>
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="97000000"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            {errorMsg && (
+              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{errorMsg}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={step === "pending"}
+              className="w-full rounded-lg bg-gray-900 text-white py-2.5 text-sm font-medium disabled:opacity-50"
+            >
+              {step === "pending" ? "Traitement..." : "Payer"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
-}
-
-function getPreviewPath(): string | null {
-  const basePath = getBasePath();
-  const { pathname } = window.location;
-  const local =
-    basePath && pathname.startsWith(basePath)
-      ? pathname.slice(basePath.length) || "/"
-      : pathname;
-  const match = local.match(/^\/preview\/(.+)$/);
-  return match ? match[1] : null;
-}
-
-function App() {
-  const previewPath = getPreviewPath();
-
-  if (previewPath) {
-    return (
-      <PreviewRenderer
-        componentPath={previewPath}
-        modules={discoveredModules}
-      />
-    );
-  }
-
-  return <Gallery />;
 }
 
 export default App;
